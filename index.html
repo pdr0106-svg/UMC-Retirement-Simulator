@@ -1,0 +1,394 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>UMC Compass Mobile (Full Chart)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 1. React Core -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- 2. Prop Types (Recharts 필수 의존성) -->
+    <script src="https://unpkg.com/prop-types/prop-types.min.js"></script>
+    
+    <!-- 3. Recharts (UMD Build) -->
+    <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+    
+    <!-- 4. Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- 5. Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; -webkit-tap-highlight-color: transparent; }
+        .mobile-container { max-width: 480px; margin: 0 auto; background-color: white; min-height: 100vh; box-shadow: 0 0 15px rgba(0,0,0,0.1); display: flex; flex-direction: column; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        input[type="number"], select { font-size: 16px; } 
+        .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect } = React;
+        
+        // Recharts 객체 안전하게 가져오기
+        const Recharts = window.Recharts || {};
+        const { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } = Recharts;
+
+        // Icon Wrapper
+        const Icon = ({ name, size = 20, className }) => {
+            useEffect(() => {
+                if (window.lucide) window.lucide.createIcons();
+            }, [name]);
+            return <i data-lucide={name} width={size} height={size} className={className}></i>;
+        };
+
+        const App = () => {
+            // --- Tab & Data State ---
+            const [activeTab, setActiveTab] = useState('analysis'); 
+
+            // Inputs
+            const [startYear, setStartYear] = useState(2026);
+            const [birthYear, setBirthYear] = useState(1987);
+            const [freezeAge, setFreezeAge] = useState(61);
+            const [targetYear, setTargetYear] = useState(2057);
+
+            const [crspBalance, setCrspBalance] = useState(8548.88);
+            const [umpipBalance, setUmpipBalance] = useState(18765.04);
+            const [compassBalance, setCompassBalance] = useState(0);
+
+            const [initialSalary, setInitialSalary] = useState(57200);
+            const [salaryGrowthRate, setSalaryGrowthRate] = useState(4.0);
+            const [investmentReturnRate, setInvestmentReturnRate] = useState(6.0);
+
+            const [usePreservationPlan, setUsePreservationPlan] = useState(true); 
+            const [personalMatchRate, setPersonalMatchRate] = useState(0);
+
+            const parsonageFactor = 1.35;
+            
+            // --- Logic ---
+            const getFixedContribution = (year) => {
+                const baseYear = 2026;
+                if (year < baseYear) return 0;
+                const yearsPassed = year - baseYear;
+                const rawAmount = 150 * Math.pow(1.02, yearsPassed);
+                const roundedAmount = Math.round(rawAmount / 5) * 5;
+                return roundedAmount * 12;
+            };
+
+            const simulationData = useMemo(() => {
+                let yearlyData = [];
+                const simulationStartYear = parseInt(startYear);
+                const totalMonths = (targetYear - simulationStartYear + 1) * 12;
+
+                if (totalMonths <= 0) return [];
+
+                let currentCrsp = parseFloat(crspBalance);
+                let currentUmpip = parseFloat(umpipBalance);
+                let currentCompass = parseFloat(compassBalance);
+                let currentBaseSalary = parseFloat(initialSalary); 
+                let totalPrincipal = parseFloat(crspBalance) + parseFloat(umpipBalance) + parseFloat(compassBalance);
+                let totalInterest = 0;
+
+                const monthlyRate = parseFloat(investmentReturnRate) / 100 / 12;
+
+                for (let m = 0; m < totalMonths; m++) {
+                    const currentYear = simulationStartYear + Math.floor(m / 12);
+                    const currentMonth = (m % 12) + 1;
+                    const age = currentYear - birthYear;
+                    const isFrozen = age >= freezeAge;
+
+                    const pensionBaseRaw = currentBaseSalary * parsonageFactor;
+                    
+                    const annualFixedContrib = getFixedContribution(currentYear);
+                    const monthlyFixedContrib = annualFixedContrib / 12;
+                    const monthlyDCContrib = (pensionBaseRaw * 0.03) / 12;
+
+                    let monthlyMatchContrib = 0;
+                    let monthlyUserContrib = 0; 
+                    let monthlySalaryBonus = 0;
+                    let totalMonthlyCompass = 0;
+                    let monthlyUmpipContrib = 0;
+
+                    if (currentYear === 2026) {
+                        // 2026 Exception
+                        monthlySalaryBonus = 0;
+                        monthlyUserContrib = 0; 
+                        const targetTotalCompass = (pensionBaseRaw * 0.105) / 12;
+                        const remaining = targetTotalCompass - monthlyFixedContrib - monthlyDCContrib;
+                        monthlyMatchContrib = remaining > 0 ? remaining : 0;
+                        totalMonthlyCompass = targetTotalCompass;
+                        monthlyUmpipContrib = (pensionBaseRaw * 0.07) / 12;
+                    } else {
+                        // 2027+
+                        if (usePreservationPlan) {
+                            const targetMonthlyCost = (pensionBaseRaw * 0.105) / 12;
+                            const basicCompassCost = monthlyFixedContrib + monthlyDCContrib;
+                            const gap = targetMonthlyCost - basicCompassCost;
+                            if (gap > 0) {
+                                monthlySalaryBonus = gap / 2; 
+                                monthlyUserContrib = gap / 2; 
+                                monthlyMatchContrib = gap / 2; 
+                            }
+                        } else {
+                            const userContrib = (pensionBaseRaw * (personalMatchRate / 100)) / 12;
+                            const maxMatch = (pensionBaseRaw * 0.04) / 12;
+                            monthlyUserContrib = userContrib;
+                            monthlyMatchContrib = Math.min(userContrib, maxMatch);
+                        }
+                        totalMonthlyCompass = monthlyFixedContrib + monthlyDCContrib + monthlyUserContrib + monthlyMatchContrib;
+                        
+                        const totalMonthlySalary = (currentBaseSalary / 12) + monthlySalaryBonus;
+                        const adjustedPensionBase = totalMonthlySalary * parsonageFactor * 12; 
+                        monthlyUmpipContrib = (adjustedPensionBase * 0.07) / 12;
+                    }
+
+                    const crspInterest = currentCrsp * monthlyRate;
+                    const umpipInterest = currentUmpip * monthlyRate;
+                    const compassInterest = currentCompass * monthlyRate;
+
+                    currentCrsp += crspInterest;
+                    currentUmpip += umpipInterest + monthlyUmpipContrib;
+                    currentCompass += compassInterest + totalMonthlyCompass;
+
+                    totalPrincipal += totalMonthlyCompass + monthlyUmpipContrib;
+                    totalInterest += (crspInterest + umpipInterest + compassInterest);
+
+                    if (currentMonth === 12) {
+                        const annualTotalSalary = currentBaseSalary + (monthlySalaryBonus * 12);
+                        const displayPensionBase = annualTotalSalary * parsonageFactor;
+
+                        yearlyData.push({
+                            year: currentYear,
+                            age: age,
+                            totalSalary: annualTotalSalary,
+                            salaryBonus: monthlySalaryBonus * 12,
+                            pensionBase: displayPensionBase,
+                            isFrozen: isFrozen,
+                            contributions: {
+                                totalCompass: totalMonthlyCompass * 12,
+                                umpip: monthlyUmpipContrib * 12
+                            },
+                            balances: {
+                                crsp: currentCrsp,
+                                umpip: currentUmpip,
+                                compass: currentCompass,
+                                total: currentCrsp + currentUmpip + currentCompass
+                            },
+                            cumulative: {
+                                principal: totalPrincipal,
+                                interest: totalInterest
+                            }
+                        });
+
+                        const nextAge = (currentYear + 1) - birthYear;
+                        if (!isFrozen && nextAge < freezeAge) {
+                            currentBaseSalary = currentBaseSalary * (1 + parseFloat(salaryGrowthRate) / 100);
+                        }
+                    }
+                }
+                return yearlyData;
+            }, [startYear, birthYear, freezeAge, targetYear, crspBalance, umpipBalance, compassBalance, initialSalary, salaryGrowthRate, investmentReturnRate, usePreservationPlan, personalMatchRate]);
+
+            const formatMoney = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(amount);
+            const finalResult = simulationData[simulationData.length - 1] || { balances: { total: 0 }, cumulative: { principal: 0, interest: 0 } };
+
+            // --- Render Components ---
+
+            const RenderSettings = () => (
+                <div className="p-4 space-y-5 pb-24">
+                    <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
+                        <div className="flex justify-between items-center mb-3">
+                            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                                <Icon name="shield" size={18} className="text-indigo-600"/> 플랜 모드
+                            </h3>
+                            <div onClick={() => setUsePreservationPlan(!usePreservationPlan)} className={`relative h-7 w-12 rounded-full transition-colors cursor-pointer ${usePreservationPlan ? 'bg-green-500' : 'bg-gray-300'}`}>
+                                <span className={`absolute top-1 left-1 bg-white w-5 h-5 rounded-full transition-transform shadow-sm ${usePreservationPlan ? 'translate-x-5' : ''}`} />
+                            </div>
+                        </div>
+                        <p className="text-xs text-slate-500 bg-slate-50 p-3 rounded">
+                            {usePreservationPlan ? "✅ 보전 플랜 (Cost Neutral): 2027년부터 차액의 50%를 급여 및 매칭으로 환원." : "⚪️ 일반 모드"}
+                        </p>
+                    </div>
+                    
+                    <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 space-y-4">
+                        <h3 className="font-bold text-slate-700 text-sm border-b pb-2">기초 설정</h3>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div><label className="text-xs text-slate-500 block mb-1">현재 연봉</label><input type="number" value={initialSalary} onChange={(e)=>setInitialSalary(Number(e.target.value))} className="w-full p-2 bg-slate-50 rounded border text-right font-bold"/></div>
+                            <div><label className="text-xs text-slate-500 block mb-1">출생년도</label><input type="number" value={birthYear} onChange={(e)=>setBirthYear(Number(e.target.value))} className="w-full p-2 bg-slate-50 rounded border text-right"/></div>
+                            <div><label className="text-xs text-slate-500 block mb-1">시작 연도</label><input type="number" value={startYear} onChange={(e)=>setStartYear(Number(e.target.value))} className="w-full p-2 bg-slate-50 rounded border text-right"/></div>
+                            <div><label className="text-xs text-slate-500 block mb-1">목표 연도</label><input type="number" value={targetYear} onChange={(e)=>setTargetYear(Number(e.target.value))} className="w-full p-2 bg-slate-50 rounded border text-right"/></div>
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-orange-600 block mb-1">임금 동결 나이: {freezeAge}세</label>
+                            <input type="range" min="50" max="70" value={freezeAge} onChange={(e)=>setFreezeAge(Number(e.target.value))} className="w-full accent-orange-500"/>
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 space-y-4">
+                        <h3 className="font-bold text-slate-700 text-sm border-b pb-2">현재 자산 ($)</h3>
+                        <div className="space-y-3">
+                            <div className="flex justify-between"><label className="text-sm text-gray-500">CRSP</label><input type="number" value={crspBalance} onChange={(e)=>setCrspBalance(Number(e.target.value))} className="w-32 p-1.5 bg-slate-50 rounded border text-right text-sm"/></div>
+                            <div className="flex justify-between"><label className="text-sm text-green-600 font-bold">UMPIP</label><input type="number" value={umpipBalance} onChange={(e)=>setUmpipBalance(Number(e.target.value))} className="w-32 p-1.5 bg-slate-50 rounded border text-right text-sm"/></div>
+                            <div className="flex justify-between"><label className="text-sm text-indigo-600 font-bold">Compass</label><input type="number" value={compassBalance} onChange={(e)=>setCompassBalance(Number(e.target.value))} className="w-32 p-1.5 bg-slate-50 rounded border text-right text-sm"/></div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const RenderAnalysis = () => (
+                <div className="p-4 space-y-5 pb-24 flex flex-col h-full">
+                    <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
+                        <div className="relative z-10">
+                            <p className="text-indigo-100 text-xs font-medium mb-1">예상 은퇴 자산 (Total Assets)</p>
+                            <h2 className="text-3xl font-bold tracking-tight">{formatMoney(finalResult.balances.total)}</h2>
+                            <div className="mt-3 flex gap-3 text-xs text-indigo-200 opacity-90">
+                                <span className="bg-white/10 px-2 py-1 rounded">원금 {formatMoney(finalResult.cumulative.principal)}</span>
+                                <span className="bg-white/10 px-2 py-1 rounded text-green-300">수익 +{formatMoney(finalResult.cumulative.interest)}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-200">
+                        <h3 className="font-bold text-slate-700 text-sm mb-3">최종 자산 구성</h3>
+                        <div className="space-y-3">
+                            <div className="flex justify-between items-center"><span className="text-sm text-indigo-600 font-bold flex gap-2"><Icon name="compass" size={16}/> Compass</span><span className="font-bold text-indigo-700">{formatMoney(finalResult.balances.compass)}</span></div>
+                            <div className="flex justify-between items-center"><span className="text-sm text-green-600 font-bold flex gap-2"><Icon name="piggy-bank" size={16}/> UMPIP</span><span className="font-bold text-green-700">{formatMoney(finalResult.balances.umpip)}</span></div>
+                            <div className="flex justify-between items-center"><span className="text-sm text-slate-500 font-bold flex gap-2"><Icon name="landmark" size={16}/> CRSP</span><span className="font-bold text-slate-600">{formatMoney(finalResult.balances.crsp)}</span></div>
+                        </div>
+                    </div>
+
+                    {/* Chart Container - Fixed Height for Mobile Safety */}
+                    <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex-1 min-h-[320px] flex flex-col">
+                        <h3 className="font-bold text-slate-700 text-sm mb-4 flex gap-2 items-center"><Icon name="trending-up" size={16}/> 자산 성장 그래프</h3>
+                        
+                        {/* Height fixed to ensure rendering on mobile */}
+                        <div style={{ width: '100%', height: '260px' }}>
+                            {AreaChart ? (
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <AreaChart data={simulationData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+                                        <defs>
+                                            <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#4f46e5" stopOpacity={0.1}/><stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/></linearGradient>
+                                        </defs>
+                                        <XAxis dataKey="year" tick={{fontSize: 10}} interval="preserveStartEnd" />
+                                        <YAxis tickFormatter={(value) => `${value/1000}k`} tick={{fontSize: 10}} />
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                        <Tooltip 
+                                            contentStyle={{borderRadius: '8px', border:'none', boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}} 
+                                            formatter={(value) => formatMoney(value)} 
+                                            labelStyle={{fontSize: '12px', color:'#64748b'}} 
+                                        />
+                                        <Legend wrapperStyle={{fontSize: '10px'}} />
+                                        {/* Area Components added for individual assets */}
+                                        <Area type="monotone" dataKey="balances.total" name="Total" stroke="#4f46e5" fill="url(#colorTotal)" strokeWidth={2} />
+                                        <Area type="monotone" dataKey="balances.compass" name="Compass" stroke="#818cf8" fill="none" strokeWidth={2} />
+                                        <Area type="monotone" dataKey="balances.umpip" name="UMPIP" stroke="#22c55e" fill="none" strokeWidth={2} />
+                                        <Area type="monotone" dataKey="balances.crsp" name="CRSP" stroke="#94a3b8" fill="none" strokeWidth={2} />
+                                    </AreaChart>
+                                </ResponsiveContainer>
+                            ) : (
+                                <div className="flex items-center justify-center h-full text-slate-400 text-sm bg-slate-50 rounded">
+                                    그래프 로딩 실패 (새로고침 해주세요)
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const RenderTable = () => (
+                <div className="flex flex-col h-full bg-white pb-20">
+                    <div className="p-4 border-b bg-slate-50 sticky top-0 z-10 flex justify-between items-center">
+                        <h3 className="font-bold text-slate-700 text-sm">연도별 상세 내역</h3>
+                        <span className="text-[10px] text-slate-400 flex gap-1"><Icon name="arrow-right-left" size={12}/> 스크롤</span>
+                    </div>
+                    <div className="flex-1 overflow-auto">
+                        <table className="w-full text-xs text-right border-collapse min-w-[600px]">
+                            <thead className="bg-slate-100 text-slate-500 font-semibold sticky top-0 z-10">
+                                <tr>
+                                    <th className="px-3 py-3 text-left border-b sticky left-0 bg-slate-100 shadow-sm z-20">Year</th>
+                                    <th className="px-3 py-3 border-b">Salary<br/><span className="text-[9px] font-normal">(Base+Bonus)</span></th>
+                                    <th className="px-3 py-3 border-b">Pension<br/>Base</th>
+                                    <th className="px-3 py-3 border-b bg-indigo-50 text-indigo-900">Compass<br/><span className="text-[9px] font-normal">(+Mo)</span></th>
+                                    <th className="px-3 py-3 border-b bg-green-50 text-green-900">UMPIP<br/><span className="text-[9px] font-normal">(+Mo)</span></th>
+                                    <th className="px-3 py-3 border-b bg-gray-50 text-gray-900">CRSP</th>
+                                    <th className="px-3 py-3 border-b font-bold bg-slate-200 sticky right-0 shadow-sm z-20">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {simulationData.map((row) => (
+                                    <tr key={row.year} className={row.isFrozen ? 'bg-orange-50/30' : ''}>
+                                        <td className="px-3 py-3 text-left font-medium text-slate-700 sticky left-0 bg-white shadow-sm z-10">
+                                            {row.year} <span className="block text-[9px] text-slate-400">{row.age}세</span>
+                                        </td>
+                                        <td className="px-3 py-3 text-slate-600">
+                                            <div className="font-bold">{formatMoney(row.totalSalary)}</div>
+                                            {row.salaryBonus > 0 && <div className="text-[9px] text-green-600">+{formatMoney(row.salaryBonus)}</div>}
+                                        </td>
+                                        <td className="px-3 py-3 text-slate-500">{formatMoney(row.pensionBase)}</td>
+                                        <td className="px-3 py-3 bg-indigo-50/20 text-indigo-700">
+                                            <div className="font-medium">{formatMoney(row.balances.compass)}</div>
+                                            <div className="text-[9px] text-indigo-400">+{formatMoney(row.contributions.totalCompass/12)}</div>
+                                        </td>
+                                        <td className="px-3 py-3 bg-green-50/20 text-green-700">
+                                            <div className="font-medium">{formatMoney(row.balances.umpip)}</div>
+                                            <div className="text-[9px] text-green-500">+{formatMoney(row.contributions.umpip/12)}</div>
+                                        </td>
+                                        <td className="px-3 py-3 bg-gray-50/20 text-gray-500">{formatMoney(row.balances.crsp)}</td>
+                                        <td className="px-3 py-3 font-bold text-slate-900 sticky right-0 bg-white shadow-sm z-10">
+                                            {formatMoney(row.balances.total)}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="mobile-container relative">
+                    <div className="h-14 bg-white border-b flex items-center justify-center sticky top-0 z-50">
+                        <h1 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                            <Icon name="shield-check" className="text-indigo-600" /> UMC Compass
+                        </h1>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-50">
+                        {activeTab === 'settings' && <RenderSettings />}
+                        {activeTab === 'analysis' && <RenderAnalysis />}
+                        {activeTab === 'table' && <RenderTable />}
+                    </div>
+
+                    <div className="h-16 bg-white border-t flex items-center justify-around safe-area-bottom sticky bottom-0 z-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+                        <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center gap-1 p-2 w-16 transition-colors ${activeTab === 'settings' ? 'text-indigo-600' : 'text-slate-400'}`}>
+                            <Icon name="sliders-horizontal" size={24} />
+                            <span className="text-[10px] font-medium">설정</span>
+                        </button>
+                        <button onClick={() => setActiveTab('analysis')} className={`flex flex-col items-center gap-1 p-2 w-16 transition-colors ${activeTab === 'analysis' ? 'text-indigo-600' : 'text-slate-400'}`}>
+                            <Icon name="pie-chart" size={24} />
+                            <span className="text-[10px] font-medium">분석</span>
+                        </button>
+                        <button onClick={() => setActiveTab('table')} className={`flex flex-col items-center gap-1 p-2 w-16 transition-colors ${activeTab === 'table' ? 'text-indigo-600' : 'text-slate-400'}`}>
+                            <Icon name="table-2" size={24} />
+                            <span className="text-[10px] font-medium">상세</span>
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+
